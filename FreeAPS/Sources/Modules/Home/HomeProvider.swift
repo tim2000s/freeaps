@@ -19,7 +19,7 @@ extension Home {
         }
 
         func heartbeatNow() {
-            apsManager.heartbeatNow()
+            apsManager.heartbeat(date: Date(), force: true)
         }
 
         func filteredGlucose(hours: Int) -> [BloodGlucose] {

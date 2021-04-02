@@ -6,7 +6,7 @@ import SwiftDate
 import Swinject
 
 protocol APSManager {
-    func heartbeatNow()
+    func heartbeat(date: Date, force: Bool)
     func autotune() -> AnyPublisher<Autotune?, Never>
     func enactBolus(amount: Double)
     var pumpManager: PumpManagerUI? { get set }
@@ -78,8 +78,8 @@ final class BaseAPSManager: APSManager, Injectable {
         pumpManager?.addStatusObserver(self, queue: processQueue)
     }
 
-    func heartbeatNow() {
-        deviceDataManager.heartbeat()
+    func heartbeat(date: Date, force: Bool) {
+        deviceDataManager.heartbeat(date: date, force: force)
     }
 
     private func fetchAndLoop() {
@@ -103,6 +103,7 @@ final class BaseAPSManager: APSManager, Injectable {
     }
 
     private func loop() {
+        debug(.apsManager, "Starting loop")
         isLooping.send(true)
         Publishers.CombineLatest(
             nightscout.fetchCarbs(),
@@ -156,12 +157,18 @@ final class BaseAPSManager: APSManager, Injectable {
                 .eraseToAnyPublisher()
         }
 
-        return Just(true).eraseToAnyPublisher()
+        return Just(false).eraseToAnyPublisher()
     }
 
     func determineBasal() -> AnyPublisher<Bool, Never> {
         guard let glucose = storage.retrieve(OpenAPS.Monitor.glucose, as: [BloodGlucose].self), glucose.count >= 36 else {
             debug(.apsManager, "Not enough glucose data")
+            return Just(false).eraseToAnyPublisher()
+        }
+
+        let lastGlucoseDate = glucoseStorage.lastGlucoseDate()
+        guard lastGlucoseDate >= Date().addingTimeInterval(-12.minutes.timeInterval) else {
+            debug(.apsManager, "Glucose data is stale")
             return Just(false).eraseToAnyPublisher()
         }
 

@@ -12,7 +12,7 @@ final class BaseGlucoseManager: GlucoseManager, Injectable {
     @Injected() var apsManager: APSManager!
 
     private var lifetime = Set<AnyCancellable>()
-    private let timer = DispatchTimer(timeInterval: 10)
+    private let timer = DispatchTimer(timeInterval: 1.minutes.timeInterval)
 
     init(resolver: Resolver) {
         injectServices(resolver)
@@ -22,16 +22,23 @@ final class BaseGlucoseManager: GlucoseManager, Injectable {
     private func subscribe() {
         timer.publisher
             .receive(on: processQueue)
-            .flatMap { date -> AnyPublisher<[BloodGlucose], Never> in
-                guard self.glucoseStogare.syncDate().timeIntervalSince1970 + 4.minutes.timeInterval <= date.timeIntervalSince1970
-                else {
-                    return Just([]).eraseToAnyPublisher()
-                }
-                return self.nightscoutManager.fetchGlucose()
+            .flatMap { date -> AnyPublisher<(Date, Date, [BloodGlucose]), Never> in
+                debug(.nightscout, "Glucose manager heartbeat")
+                debug(.nightscout, "Start fetching glucose")
+                return Publishers.CombineLatest3(
+                    Just(date),
+                    Just(self.glucoseStogare.syncDate()),
+                    self.nightscoutManager.fetchGlucose()
+                )
+                .eraseToAnyPublisher()
             }
-            .sink { glucose in
-                if !glucose.isEmpty {
-                    self.apsManager.heartbeatNow()
+            .sink { date, syncDate, glucose in
+                // Because of Spike dosn't respect a date query
+                let filteredByDate = glucose.filter { $0.dateString > syncDate }
+                let filtered = self.glucoseStogare.filterTooFrequentGlucose(filteredByDate, at: syncDate)
+                if !filtered.isEmpty {
+                    debug(.nightscout, "New glucose found")
+                    self.apsManager.heartbeat(date: date, force: true)
                 }
             }
             .store(in: &lifetime)
