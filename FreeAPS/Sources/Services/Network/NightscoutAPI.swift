@@ -31,7 +31,7 @@ extension NightscoutAPI {
     func checkConnection() -> AnyPublisher<Void, Swift.Error> {
         struct Check: Codable, Equatable {
             var eventType = "Note"
-            var enteredBy = "freeaps-x://"
+            var enteredBy = "freeaps-x"
             var notes = "FreeAPS X connected"
         }
         let check = Check()
@@ -107,7 +107,7 @@ extension NightscoutAPI {
         ]
         if let date = sinceDate {
             let dateItem = URLQueryItem(
-                name: "find[created_at][$gte]",
+                name: "find[created_at][$gt]",
                 value: Formatter.iso8601withFractionalSeconds.string(from: date)
             )
             components.queryItems?.append(dateItem)
@@ -127,6 +127,35 @@ extension NightscoutAPI {
             .eraseToAnyPublisher()
     }
 
+    func deleteCarbs(at date: Date) -> AnyPublisher<Void, Swift.Error> {
+        var components = URLComponents()
+        components.scheme = url.scheme
+        components.host = url.host
+        components.port = url.port
+        components.path = Config.treatmentsPath
+        components.queryItems = [
+            URLQueryItem(name: "find[carbs][$exists]", value: "true"),
+            URLQueryItem(
+                name: "find[created_at][$eq]",
+                value: Formatter.iso8601withFractionalSeconds.string(from: date)
+            )
+        ]
+
+        var request = URLRequest(url: components.url!)
+        request.allowsConstrainedNetworkAccess = false
+        request.timeoutInterval = Config.timeout
+        request.httpMethod = "DELETE"
+
+        if let secret = secret {
+            request.addValue(secret.sha1(), forHTTPHeaderField: "api-secret")
+        }
+
+        return service.run(request)
+            .retry(Config.retryCount)
+            .map { _ in () }
+            .eraseToAnyPublisher()
+    }
+
     func fetchTempTargets(sinceDate: Date? = nil) -> AnyPublisher<[TempTarget], Swift.Error> {
         var components = URLComponents()
         components.scheme = url.scheme
@@ -142,11 +171,12 @@ extension NightscoutAPI {
             URLQueryItem(
                 name: "find[enteredBy][$ne]",
                 value: NigtscoutTreatment.local.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed)
-            )
+            ),
+            URLQueryItem(name: "find[duration][$exists]", value: "true")
         ]
         if let date = sinceDate {
             let dateItem = URLQueryItem(
-                name: "find[created_at][$gte]",
+                name: "find[created_at][$gt]",
                 value: Formatter.iso8601withFractionalSeconds.string(from: date)
             )
             components.queryItems?.append(dateItem)

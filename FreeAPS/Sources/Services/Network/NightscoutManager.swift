@@ -5,9 +5,10 @@ import UIKit
 
 protocol NightscoutManager {
     func fetchGlucose() -> AnyPublisher<[BloodGlucose], Never>
-    func fetchCarbs() -> AnyPublisher<Void, Never>
-    func fetchTempTargets() -> AnyPublisher<Void, Never>
+    func fetchCarbs() -> AnyPublisher<[CarbsEntry], Never>
+    func fetchTempTargets() -> AnyPublisher<[TempTarget], Never>
     func fetchAnnouncements() -> AnyPublisher<Void, Never>
+    func deleteCarbs(at date: Date)
     func uploadStatus()
     var cgmURL: URL? { get }
 }
@@ -22,10 +23,15 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
     @Injected() private var announcementsStorage: AnnouncementsStorage!
     @Injected() private var settingsManager: SettingsManager!
     @Injected() private var broadcaster: Broadcaster!
+    @Injected() private var reachabilityManager: ReachabilityManager!
 
     private let processQueue = DispatchQueue(label: "BaseNetworkManager.processQueue")
 
     private var lifetime = Set<AnyCancellable>()
+
+    private var isNetworkReachable: Bool {
+        reachabilityManager.isReachable
+    }
 
     private var isUploadEnabled: Bool {
         settingsManager.settings.isUploadEnabled ?? false
@@ -82,43 +88,33 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
                 return Just([]).setFailureType(to: Error.self).eraseToAnyPublisher()
             })
             .replaceError(with: [])
-            .map {
-                self.glucoseStorage.storeGlucose($0)
-                return $0
-            }
             .eraseToAnyPublisher()
     }
 
-    func fetchCarbs() -> AnyPublisher<Void, Never> {
-        guard let nightscout = nightscoutAPI else {
-            return Just(()).eraseToAnyPublisher()
+    func fetchCarbs() -> AnyPublisher<[CarbsEntry], Never> {
+        guard let nightscout = nightscoutAPI, isNetworkReachable else {
+            return Just([]).eraseToAnyPublisher()
         }
 
         let since = carbsStorage.syncDate()
         return nightscout.fetchCarbs(sinceDate: since)
             .replaceError(with: [])
-            .map {
-                self.carbsStorage.storeCarbs($0)
-                return ()
-            }.eraseToAnyPublisher()
+            .eraseToAnyPublisher()
     }
 
-    func fetchTempTargets() -> AnyPublisher<Void, Never> {
-        guard let nightscout = nightscoutAPI else {
-            return Just(()).eraseToAnyPublisher()
+    func fetchTempTargets() -> AnyPublisher<[TempTarget], Never> {
+        guard let nightscout = nightscoutAPI, isNetworkReachable else {
+            return Just([]).eraseToAnyPublisher()
         }
 
         let since = tempTargetsStorage.syncDate()
         return nightscout.fetchTempTargets(sinceDate: since)
             .replaceError(with: [])
-            .map {
-                self.tempTargetsStorage.storeTempTargets($0)
-                return ()
-            }.eraseToAnyPublisher()
+            .eraseToAnyPublisher()
     }
 
     func fetchAnnouncements() -> AnyPublisher<Void, Never> {
-        guard let nightscout = nightscoutAPI else {
+        guard let nightscout = nightscoutAPI, isNetworkReachable else {
             return Just(()).eraseToAnyPublisher()
         }
 
@@ -129,6 +125,25 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
                 self.announcementsStorage.storeAnnouncements($0, enacted: false)
                 return ()
             }.eraseToAnyPublisher()
+    }
+
+    func deleteCarbs(at date: Date) {
+        guard let nightscout = nightscoutAPI, isUploadEnabled else {
+            carbsStorage.deleteCarbs(at: date)
+            return
+        }
+
+        nightscout.deleteCarbs(at: date)
+            .sink { completion in
+                switch completion {
+                case .finished:
+                    self.carbsStorage.deleteCarbs(at: date)
+                    debug(.nightscout, "Carbs deleted")
+                case let .failure(error):
+                    debug(.nightscout, error.localizedDescription)
+                }
+            } receiveValue: {}
+            .store(in: &lifetime)
     }
 
     func uploadStatus() {
@@ -210,7 +225,17 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
         }
 
         processQueue.async {
-            nightscout.uploadTreatments(treatments)
+            treatments.chunks(ofCount: 100)
+                .map { chunk -> AnyPublisher<Void, Error> in
+                    nightscout.uploadTreatments(Array(chunk))
+                }
+                .reduce(
+                    Just(()).setFailureType(to: Error.self)
+                        .eraseToAnyPublisher()
+                ) { (result, next) -> AnyPublisher<Void, Error> in
+                    Publishers.Concatenate(prefix: result, suffix: next).eraseToAnyPublisher()
+                }
+                .dropFirst()
                 .sink { completion in
                     switch completion {
                     case .finished:

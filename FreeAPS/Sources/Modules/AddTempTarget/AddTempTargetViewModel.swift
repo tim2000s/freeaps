@@ -37,10 +37,10 @@ extension AddTempTarget {
                 targetTop: highTarget,
                 targetBottom: lowTarget,
                 duration: duration,
-                enteredBy: TempTarget.manual
+                enteredBy: TempTarget.manual,
+                reason: TempTarget.custom
             )
             storage.storeTempTargets([entry])
-            apsManager.determineBasal().sink { _ in }.store(in: &lifetime)
 
             showModal(for: nil)
         }
@@ -52,10 +52,10 @@ extension AddTempTarget {
                 targetTop: 0,
                 targetBottom: 0,
                 duration: 0,
-                enteredBy: TempTarget.manual
+                enteredBy: TempTarget.manual,
+                reason: TempTarget.cancel
             )
             storage.storeTempTargets([entry])
-            apsManager.determineBasal().sink { _ in }.store(in: &lifetime)
 
             showModal(for: nil)
         }
@@ -77,7 +77,8 @@ extension AddTempTarget {
                 targetTop: highTarget,
                 targetBottom: lowTarget,
                 duration: duration,
-                enteredBy: TempTarget.manual
+                enteredBy: TempTarget.manual,
+                reason: newPresetName.isEmpty ? TempTarget.custom : newPresetName
             )
 
             presets.append(entry)
@@ -88,7 +89,6 @@ extension AddTempTarget {
             if var preset = presets.first(where: { $0.id == id }) {
                 preset.createdAt = Date()
                 storage.storeTempTargets([preset])
-                apsManager.determineBasal().sink { _ in }.store(in: &lifetime)
                 showModal(for: nil)
             }
         }

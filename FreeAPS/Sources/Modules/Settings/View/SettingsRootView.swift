@@ -3,6 +3,7 @@ import SwiftUI
 extension Settings {
     struct RootView: BaseView {
         @EnvironmentObject var viewModel: ViewModel<Provider>
+        @State private var showShareSheet = false
 
         var body: some View {
             Form {
@@ -75,8 +76,23 @@ extension Settings {
                             Text("Autotune").chevronCell()
                                 .navigationLink(to: .configEditor(file: OpenAPS.Settings.autotune), from: self)
                         }
+
+                        Group {
+                            Text("Target presets").chevronCell()
+                                .navigationLink(to: .configEditor(file: OpenAPS.FreeAPS.tempTargetsPresets), from: self)
+                        }
                     }
                 }
+
+                Section {
+                    Text("Share logs").chevronCell()
+                        .onTapGesture {
+                            showShareSheet = true
+                        }
+                }
+            }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(activityItems: viewModel.logItems())
             }
             .navigationTitle("Settings")
             .navigationBarItems(leading: Button("Close", action: viewModel.hideModal))

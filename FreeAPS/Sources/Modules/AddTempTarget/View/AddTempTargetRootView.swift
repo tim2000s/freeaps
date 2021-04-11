@@ -78,18 +78,18 @@ extension AddTempTarget {
             var low = preset.targetBottom
             var high = preset.targetTop
             if viewModel.units == .mmolL {
-                low = low.asMmolL
-                high = high.asMmolL
+                low = low?.asMmolL
+                high = high?.asMmolL
             }
             return HStack {
                 VStack {
                     HStack {
-                        Text(preset.name)
+                        Text(preset.displayName)
                         Spacer()
                     }
                     HStack {
                         Text(
-                            "\(formatter.string(from: low as NSNumber)!) - \(formatter.string(from: high as NSNumber)!)"
+                            "\(formatter.string(from: (low ?? 0) as NSNumber)!) - \(formatter.string(from: (high ?? 0) as NSNumber)!)"
                         )
                         .foregroundColor(.secondary)
                         .font(.caption)
@@ -114,7 +114,7 @@ extension AddTempTarget {
                     .onTapGesture {
                         removeAlert = Alert(
                             title: Text("A you sure?"),
-                            message: Text("Delete preset \"\(preset.name)\""),
+                            message: Text("Delete preset \"\(preset.displayName)\""),
                             primaryButton: .destructive(Text("Delete"), action: { viewModel.removePreset(id: preset.id) }),
                             secondaryButton: .cancel()
                         )
